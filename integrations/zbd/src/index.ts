@@ -13,13 +13,13 @@ type SendLNAddressPaymentResponse = {
     fee: string,                   // fee in satoshis (0 if no fee)
     unit: string,                  // unit of transaction (satoshis)
     amount: string,                // amount in satoshis
+    status: string,                // status of transaction
     invoice: string,               // lightning network invoice/charge
     walletId: string,              // id of wallet performing transaction
+    createdAt: string,             // timestamp of transaction creation
     transactionId: string,         // transaction id
-    status: string | null,         // status of transaction
     comment: string | null,        // comment attached to transaction
     preimage: string | null,       // lightning preimage
-    createdAt: string | null,      // timestamp of transaction creation
     internalId: string | null,     // internal user-entered metadata
     callbackUrl: string | null,    // callback url to receive updates
     processedAt: string | null,    // timestamp of transaction settlement
