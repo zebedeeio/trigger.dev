@@ -27,3 +27,31 @@ Please follow the best-practice of adding changesets in the same commit as the c
 3. Create version `pnpm run changeset:version`
 4. Release `pnpm run changeset:release`
 5. Switch back to normal mode by running `pnpm run changeset:normal`
+
+## Snapshot instructions
+
+!MAKE SURE TO UPDATE THE TAG IN THE INSTRUCTIONS BELOW!
+
+1. Add changesets as usual
+
+```sh
+pnpm run changeset:add
+```
+
+2. Create a snapshot version (replace "prerelease" with your tag)
+
+```sh
+pnpm exec changeset version --snapshot prerelease
+```
+
+3. Build the packages:
+
+```sh
+pnpm run build --filter "@trigger.dev/*"
+```
+
+4. Publish the snapshot (replace "dev" with your tag)
+
+```sh
+pnpm exec changeset publish --no-git-tag --snapshot --tag prerelease
+```

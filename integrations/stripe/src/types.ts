@@ -6,7 +6,7 @@ export type StripeSDK = Stripe;
 
 export type StripeIntegrationOptions = {
   id: string;
-  apiKey: string;
+  apiKey?: string;
 
   /**
    * An account id on whose behalf you wish to make every request.
@@ -81,3 +81,8 @@ export type OnExternalAccountEvent =
   ExtractWebhookPayload<Stripe.DiscriminatedEvent.AccountExternalAccountEvent>;
 
 export type OnPersonEvent = ExtractWebhookPayload<Stripe.DiscriminatedEvent.PersonEvent>;
+
+export type OnPaymentIntentEvent =
+  ExtractWebhookPayload<Stripe.DiscriminatedEvent.PaymentIntentEvent>;
+
+export type OnPayoutEvent = ExtractWebhookPayload<Stripe.DiscriminatedEvent.PayoutEvent>;

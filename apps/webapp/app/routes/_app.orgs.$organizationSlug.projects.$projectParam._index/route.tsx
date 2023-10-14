@@ -1,9 +1,7 @@
 import { ArrowUpIcon } from "@heroicons/react/24/solid";
-import { LoaderArgs, SerializeFrom } from "@remix-run/server-runtime";
-import useWindowSize from "react-use/lib/useWindowSize";
+import { LoaderArgs } from "@remix-run/server-runtime";
 import { typedjson, useTypedLoaderData } from "remix-typedjson";
-import { ExternalScriptsFunction } from "remix-utils";
-import { HowToSetupYourProject } from "~/components/helpContent/HelpContentText";
+import { FrameworkSelector } from "~/components/frameworks/FrameworkSelector";
 import { JobsTable } from "~/components/jobs/JobsTable";
 import { PageBody, PageContainer } from "~/components/layout/AppLayout";
 import { BreadcrumbLink } from "~/components/navigation/NavBar";
@@ -21,6 +19,7 @@ import {
   PageTitleRow,
 } from "~/components/primitives/PageHeader";
 import { Paragraph } from "~/components/primitives/Paragraph";
+import { Switch } from "~/components/primitives/Switch";
 import { TextLink } from "~/components/primitives/TextLink";
 import { useFilterJobs } from "~/hooks/useFilterJobs";
 import { useOrganization } from "~/hooks/useOrganizations";
@@ -58,39 +57,39 @@ export const loader = async ({ request, params }: LoaderArgs) => {
 export const handle: Handle = {
   breadcrumb: (match) => <BreadcrumbLink to={trimTrailingSlash(match.pathname)} title="Jobs" />,
   expandSidebar: true,
-  scripts: (match) => [
-    {
-      src: "https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js",
-      crossOrigin: "anonymous",
-    },
-  ],
 };
 
 export default function Page() {
   const organization = useOrganization();
   const project = useProject();
   const { jobs } = useTypedLoaderData<typeof loader>();
-
-  const { filterText, setFilterText, filteredItems } = useFilterJobs(jobs);
+  const { filterText, setFilterText, filteredItems, onlyActiveJobs, setOnlyActiveJobs } =
+    useFilterJobs(jobs);
+  const totalJobs = jobs.length;
+  const hasJobs = totalJobs > 0;
+  const activeJobCount = jobs.filter((j) => j.status === "ACTIVE").length;
 
   return (
-    <PageContainer>
-      <PageHeader>
-        <PageTitleRow>
-          <PageTitle title="Jobs" />
-        </PageTitleRow>
-        <PageInfoRow>
-          <PageInfoGroup>
-            <PageInfoProperty icon={"job"} label={"Active Jobs"} value={jobs.length} />
-          </PageInfoGroup>
-        </PageInfoRow>
-      </PageHeader>
+    <PageContainer className={hasJobs ? "" : "grid-rows-1"}>
+      {hasJobs && (
+        <PageHeader>
+          <PageTitleRow>
+            <PageTitle title="Jobs" />
+          </PageTitleRow>
+          <PageInfoRow>
+            <PageInfoGroup>
+              <PageInfoProperty icon={"job"} label={"All Jobs"} value={totalJobs} />
+              <PageInfoProperty icon={"job"} label={"Active Jobs"} value={activeJobCount} />
+            </PageInfoGroup>
+          </PageInfoRow>
+        </PageHeader>
+      )}
       <PageBody>
         <Help>
           {(open) => (
             <div className={cn("grid gap-4", open ? "h-full grid-cols-2" : " h-full grid-cols-1")}>
               <div className="h-full">
-                {jobs.length > 0 ? (
+                {hasJobs ? (
                   <>
                     {jobs.some((j) => j.hasIntegrationsRequiringAction) && (
                       <Callout
@@ -102,7 +101,7 @@ export default function Page() {
                       </Callout>
                     )}
                     <div className="mb-2 flex flex-col">
-                      <div className="flex w-full">
+                      <div className="flex w-full gap-x-2">
                         <Input
                           placeholder="Search Jobs"
                           variant="tertiary"
@@ -110,6 +109,14 @@ export default function Page() {
                           fullWidth={true}
                           value={filterText}
                           onChange={(e) => setFilterText(e.target.value)}
+                          autoFocus
+                        />
+                        <Switch
+                          variant="small"
+                          label="Active Jobs"
+                          checked={onlyActiveJobs}
+                          onCheckedChange={setOnlyActiveJobs}
+                          className={"shrink-0"}
                         />
                         <HelpTrigger title="Example Jobs and inspiration" />
                       </div>
@@ -126,7 +133,7 @@ export default function Page() {
                       )}
                   </>
                 ) : (
-                  <HowToSetupYourProject />
+                  <FrameworkSelector />
                 )}
               </div>
               <HelpContent title="Example Jobs and inspiration">
@@ -166,7 +173,7 @@ function ExampleJobs() {
         height="250"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
         allowFullScreen
-        className="mb-4 w-full border-b border-slate-800"
+        className="mb-4 border-b border-slate-800"
       />
       <Header2 spacing>How to create a Job</Header2>
       <Paragraph variant="small" spacing>

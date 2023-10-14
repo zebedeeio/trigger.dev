@@ -13,13 +13,14 @@ import {
 import { Link } from "@remix-run/react";
 import { cn } from "~/utils/cn";
 import { Paragraph } from "./Paragraph";
+import { Spinner } from "./Spinner";
 
 export const variantClasses = {
   info: {
-    className: "border-blue-400/20 bg-blue-400/30",
-    icon: <InformationCircleIcon className="h-5 w-5 shrink-0 text-blue-400" />,
-    textColor: "text-blue-200",
-    linkClassName: "transition hover:bg-blue-400/40",
+    className: "border-slate-700 bg-slate-800",
+    icon: <InformationCircleIcon className="h-5 w-5 shrink-0 text-dimmed" />,
+    textColor: "text-bright",
+    linkClassName: "transition hover:bg-slate-750",
   },
   warning: {
     className: "border-yellow-400/20 bg-yellow-400/30",
@@ -51,7 +52,15 @@ export const variantClasses = {
     textColor: "text-blue-200",
     linkClassName: "transition hover:bg-blue-400/40",
   },
+  pending: {
+    className: "border-blue-400/20 bg-blue-800/30",
+    icon: <Spinner className="h-5 w-5 shrink-0 " />,
+    textColor: "text-blue-300",
+    linkClassName: "transition hover:bg-blue-400/40",
+  },
 } as const;
+
+export type CalloutVariant = keyof typeof variantClasses;
 
 export function Callout({
   children,
@@ -63,7 +72,7 @@ export function Callout({
   children?: React.ReactNode;
   className?: string;
   icon?: React.ReactNode;
-  variant: keyof typeof variantClasses;
+  variant: CalloutVariant;
   to?: string;
 }) {
   const variantDefinition = variantClasses[variant];

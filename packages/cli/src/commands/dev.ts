@@ -1,29 +1,37 @@
+import boxen from "boxen";
 import childProcess from "child_process";
 import chokidar from "chokidar";
-import fs from "fs/promises";
 import ngrok from "ngrok";
-import fetch from "node-fetch";
 import ora, { Ora } from "ora";
-import pathModule from "path";
+import pRetry, { AbortError } from "p-retry";
 import util from "util";
 import { z } from "zod";
+import { Framework } from "../frameworks";
+import { standardWatchFilePaths, standardWatchIgnoreRegex } from "../frameworks/watchConfig";
 import { telemetryClient } from "../telemetry/telemetry";
+import { getEnvFilename } from "../utils/env";
+import fetch from "../utils/fetchUseProxy";
 import { getTriggerApiDetails } from "../utils/getTriggerApiDetails";
+import { JsRuntime, getJsRuntime } from "../utils/jsRuntime";
 import { logger } from "../utils/logger";
 import { resolvePath } from "../utils/parseNameAndPath";
+import { RequireKeys } from "../utils/requiredKeys";
+import { Throttle } from "../utils/throttle";
 import { TriggerApi } from "../utils/triggerApi";
+import { wait } from "../utils/wait";
 
 const asyncExecFile = util.promisify(childProcess.execFile);
 
 export const DevCommandOptionsSchema = z.object({
-  port: z.coerce.number(),
-  hostname: z.string(),
-  envFile: z.string(),
+  port: z.coerce.number().optional(),
+  hostname: z.string().optional(),
+  envFile: z.string().optional(),
   handlerPath: z.string(),
   clientId: z.string().optional(),
 });
 
 export type DevCommandOptions = z.infer<typeof DevCommandOptionsSchema>;
+type ResolvedOptions = RequireKeys<DevCommandOptions, "handlerPath" | "envFile">;
 
 const throttleTimeMs = 1000;
 
@@ -32,6 +40,8 @@ const formattedDate = new Intl.DateTimeFormat("en", {
   minute: "numeric",
   second: "numeric",
 });
+
+let runtime: JsRuntime;
 
 export async function devCommand(path: string, anyOptions: any) {
   telemetryClient.dev.started(path, anyOptions);
@@ -45,9 +55,12 @@ export async function devCommand(path: string, anyOptions: any) {
   const options = result.data;
 
   const resolvedPath = resolvePath(path);
+  runtime = await getJsRuntime(resolvedPath, logger);
+  //check for outdated packages, don't await this
+  runtime.checkForOutdatedPackages();
 
   // Read from package.json to get the endpointId
-  const endpointId = await getEndpointIdFromPackageJson(resolvedPath, options);
+  const endpointId = await getEndpointId(runtime, options.clientId);
   if (!endpointId) {
     logger.error(
       "You must run the `init` command first to setup the project – you are missing \n'trigger.dev': { 'endpointId': 'your-client-id' } from your package.json file, or pass in the --client-id option to this command"
@@ -57,180 +70,346 @@ export async function devCommand(path: string, anyOptions: any) {
   }
   logger.success(`✔️ [trigger.dev] Detected TriggerClient id: ${endpointId}`);
 
+  //resolve the options using the detected framework (use default if there isn't a matching framework)
+  const packageManager = await runtime.getUserPackageManager();
+  const framework = await runtime.getFramework();
+  const resolvedOptions = await resolveOptions(framework, resolvedPath, options);
+
   // Read from .env.local or .env to get the TRIGGER_API_KEY and TRIGGER_API_URL
-  const apiDetails = await getTriggerApiDetails(resolvedPath, options.envFile);
-
+  const apiDetails = await getTriggerApiDetails(resolvedPath, resolvedOptions.envFile);
   if (!apiDetails) {
-    telemetryClient.dev.failed("missing_api_key", options);
+    telemetryClient.dev.failed("missing_api_key", resolvedOptions);
     return;
   }
+  const { apiUrl, apiKey, apiKeySource } = apiDetails;
+  logger.success(`✔️ [trigger.dev] Found API Key in ${apiKeySource}`);
 
-  const { apiUrl, envFile, apiKey } = apiDetails;
-
-  logger.success(`✔️ [trigger.dev] Found API Key in ${envFile} file`);
-
-  logger.info(`  [trigger.dev] Looking for Next.js site on port ${options.port}`);
-
-  const localEndpointHandlerUrl = `http://${options.hostname}:${options.port}${options.handlerPath}`;
-
-  try {
-    await fetch(localEndpointHandlerUrl, {
-      method: "POST",
-      headers: {
-        "x-trigger-api-key": apiKey,
-        "x-trigger-action": "PING",
-        "x-trigger-endpoint-id": endpointId,
-      },
-    });
-  } catch (err) {
+  //verify that the endpoint can be reached
+  const verifiedEndpoint = await verifyEndpoint(resolvedOptions, endpointId, apiKey, framework);
+  if (!verifiedEndpoint) {
     logger.error(
-      `❌ [trigger.dev] No server found on port ${options.port}. Make sure your Next.js app is running and try again.`
+      `✖ [trigger.dev] Your endpoint couldn't be verified. Make sure your app is running and try again. ${resolvedOptions.handlerPath}`
     );
-    telemetryClient.dev.failed("no_server_found", options);
+    logger.info(`  [trigger.dev] You can use -H to specify a hostname, or -p to specify a port.`);
+    telemetryClient.dev.failed("no_server_found", resolvedOptions);
     return;
   }
 
-  telemetryClient.dev.serverRunning(path, options);
+  const { hostname, port, handlerPath } = verifiedEndpoint;
+
+  telemetryClient.dev.serverRunning(path, resolvedOptions);
 
   // Setup tunnel
-  const endpointUrl = await resolveEndpointUrl(apiUrl, options.port, options.hostname);
+  const endpointUrl = await resolveEndpointUrl(apiUrl, port, hostname);
   if (!endpointUrl) {
-    telemetryClient.dev.failed("failed_to_create_tunnel", options);
+    telemetryClient.dev.failed("failed_to_create_tunnel", resolvedOptions);
     return;
   }
 
-  const endpointHandlerUrl = `${endpointUrl}${options.handlerPath}`;
-  telemetryClient.dev.tunnelRunning(path, options);
+  const endpointHandlerUrl = `${endpointUrl}${handlerPath}`;
+  telemetryClient.dev.tunnelRunning(path, resolvedOptions);
+
+  // Watch for changes to files and refresh endpoints
+  const watchPaths = (framework?.watchFilePaths ?? standardWatchFilePaths).map(
+    (path) => `${resolvedPath}/${path}`
+  );
+  const ignored = framework?.watchIgnoreRegex ?? standardWatchIgnoreRegex;
+  const watcher = chokidar.watch(watchPaths, {
+    ignored,
+    //don't trigger a watch when it collects the paths
+    ignoreInitial: true,
+  });
 
   const connectingSpinner = ora(`[trigger.dev] Registering endpoint ${endpointHandlerUrl}...`);
-
-  //refresh function
   let hasConnected = false;
-  let attemptCount = 0;
-  const refresh = async () => {
-    connectingSpinner.start();
+  const abortController = new AbortController();
 
-    const refreshedEndpointId = await getEndpointIdFromPackageJson(resolvedPath, options);
-
-    // Read from .env.local to get the TRIGGER_API_KEY and TRIGGER_API_URL
-    const apiDetails = await getTriggerApiDetails(resolvedPath, envFile);
-
-    if (!apiDetails) {
-      connectingSpinner.fail(`❌ [trigger.dev] Failed to connect: Missing API Key`);
-      logger.info(`Will attempt again on the next file change…`);
-      attemptCount = 0;
-      return;
-    }
-
-    const { apiKey, apiUrl } = apiDetails;
-    const apiClient = new TriggerApi(apiKey, apiUrl);
-
-    const authorizedKey = await apiClient.whoami(apiKey);
-    if (!authorizedKey) {
-      logger.error(
-        `🛑 The API key you provided is not authorized. Try visiting your dashboard to get a new API key.`
-      );
-
-      telemetryClient.dev.failed("invalid_api_key", options);
-      return;
-    }
-
-    telemetryClient.identify(
-      authorizedKey.organization.id,
-      authorizedKey.project.id,
-      authorizedKey.userId
-    );
-
-    const result = await refreshEndpoint(
-      apiClient,
-      refreshedEndpointId ?? endpointId,
-      endpointHandlerUrl
-    );
-    if (result.success) {
-      attemptCount = 0;
-      connectingSpinner.succeed(
-        `[trigger.dev] 🔄 Refreshed ${refreshedEndpointId ?? endpointId} ${formattedDate.format(
-          new Date(result.data.updatedAt)
-        )}`
-      );
-
-      if (!hasConnected) {
-        hasConnected = true;
-        telemetryClient.dev.connected(path, options);
-      }
-    } else {
-      attemptCount++;
-
-      if (attemptCount === 10 || !result.retryable) {
-        connectingSpinner.fail(`🚨 Failed to connect: ${result.error}`);
-        logger.info(`Will attempt again on the next file change…`);
-        attemptCount = 0;
-
-        if (!hasConnected) {
-          telemetryClient.dev.failed("failed_to_connect", options);
-        }
-        return;
-      }
-
-      const delay = backoff(attemptCount);
-      // console.log(`Attempt: ${attemptCount}`, delay);
-      await wait(delay);
-      refresh();
-    }
+  const r = () => {
+    refresh({
+      endpointId,
+      spinner: connectingSpinner,
+      path: resolvedPath,
+      endpointHandlerUrl,
+      resolvedOptions,
+      hasConnected,
+      abortController,
+    });
   };
 
-  // Watch for changes to .ts files and refresh endpoints
-  const watcher = chokidar.watch(
-    [
-      `${resolvedPath}/**/*.ts`,
-      `${resolvedPath}/**/*.tsx`,
-      `${resolvedPath}/**/*.js`,
-      `${resolvedPath}/**/*.jsx`,
-      `${resolvedPath}/**/*.json`,
-      `${resolvedPath}/pnpm-lock.yaml`,
-    ],
-    {
-      ignored: /(node_modules|\.next)/,
-      //don't trigger a watch when it collects the paths
-      ignoreInitial: true,
-    }
-  );
+  const throttle = new Throttle(r, throttleTimeMs);
 
   watcher.on("all", (_event, _path) => {
-    // console.log(_event, _path);
-    throttle(refresh, throttleTimeMs);
+    throttle.call();
   });
 
   //Do initial refresh
-  throttle(refresh, throttleTimeMs);
+  throttle.call();
 }
 
-export async function getEndpointIdFromPackageJson(path: string, options: DevCommandOptions) {
-  if (options.clientId) {
-    return options.clientId;
+type RefreshOptions = {
+  spinner: Ora;
+  path: string;
+  endpointId: string;
+  endpointHandlerUrl: string;
+  resolvedOptions: ResolvedOptions;
+  hasConnected: boolean;
+  abortController: AbortController;
+};
+
+async function refresh(options: RefreshOptions) {
+  //stop any existing refreshes
+  options.abortController.abort();
+  options.abortController = new AbortController();
+
+  // Read from env file to get the TRIGGER_API_KEY and TRIGGER_API_URL
+  const apiDetails = await getTriggerApiDetails(options.path, options.resolvedOptions.envFile);
+  if (!apiDetails) {
+    options.spinner.fail("[trigger.dev] Failed to connect: Missing API Key");
+    return;
   }
 
-  const pkgJsonPath = pathModule.join(path, "package.json");
-  const pkgBuffer = await fs.readFile(pkgJsonPath);
-  const pkgJson = JSON.parse(pkgBuffer.toString());
+  const { apiKey, apiUrl } = apiDetails;
+  const apiClient = new TriggerApi(apiKey, apiUrl);
 
-  const value = pkgJson["trigger.dev"]?.endpointId;
-  if (!value || typeof value !== "string") return;
+  try {
+    const index = await pRetry(() => startIndexing({ ...options, apiClient }), {
+      retries: 5,
+      signal: options.abortController.signal,
+      maxTimeout: 5000,
+    });
+    options.spinner.text = `[trigger.dev] Refreshing ${formattedDate.format(index.updatedAt)}`;
 
-  return value as string;
+    if (!options.hasConnected) {
+      options.hasConnected = true;
+      telemetryClient.dev.connected(options.path, options.resolvedOptions);
+    }
+
+    //this is for backwards-compatibility with older servers
+    if (index.id === undefined) {
+      options.spinner.succeed(`[trigger.dev] Refreshed ${formattedDate.format(index.updatedAt)}`);
+      return;
+    }
+
+    //wait 750ms before attempting to get the indexing result
+    await wait(750);
+
+    const indexResult = await pRetry(() => fetchIndexResult({ indexId: index.id, apiClient }), {
+      //this means we're polling, same distance between each attempt
+      factor: 1,
+      retries: 10,
+      signal: options.abortController.signal,
+    });
+
+    if (indexResult.status === "FAILURE") {
+      options.spinner.fail(
+        `[trigger.dev] Refreshing failed ${formattedDate.format(indexResult.updatedAt)}`
+      );
+      logger.error(
+        boxen(indexResult.error.message, {
+          padding: 1,
+          borderStyle: "double",
+        })
+      );
+      return;
+    }
+
+    options.spinner.succeed(
+      `[trigger.dev] Refreshed ${formattedDate.format(indexResult.updatedAt)}`
+    );
+  } catch (e) {
+    if (e instanceof AbortError) {
+      options.spinner.fail(e.message);
+      logger.info(`  [trigger.dev] Will attempt again on the next file change…`);
+      return;
+    }
+
+    let message: string = "";
+    if (e instanceof Error) {
+      message = e.message;
+    } else {
+      message = "Unknown error";
+    }
+
+    options.spinner.fail(message);
+    logger.info(`  [trigger.dev] Will attempt again on the next file change…`);
+
+    if (!options.hasConnected) {
+      telemetryClient.dev.failed("failed_to_connect", options.resolvedOptions);
+    }
+  }
+}
+
+async function startIndexing({
+  spinner,
+  path,
+  endpointId,
+  endpointHandlerUrl,
+  resolvedOptions,
+  apiClient,
+}: RefreshOptions & { apiClient: TriggerApi }) {
+  spinner.start();
+  const refreshedEndpointId = await getEndpointId(runtime, resolvedOptions.clientId);
+
+  const authorizedKey = await apiClient.whoami();
+  if (!authorizedKey) {
+    telemetryClient.dev.failed("invalid_api_key", resolvedOptions);
+    throw new AbortError(
+      "[trigger.dev] The API key you provided is not authorized. Try visiting your dashboard to get a new API key."
+    );
+  }
+
+  telemetryClient.identify(
+    authorizedKey.organization.id,
+    authorizedKey.project.id,
+    authorizedKey.userId
+  );
+
+  const result = await refreshEndpoint(
+    apiClient,
+    refreshedEndpointId ?? endpointId,
+    endpointHandlerUrl
+  );
+
+  if (!result.success) {
+    throw new Error(result.error);
+  }
+
+  return { id: result.data.endpointIndex?.id, updatedAt: new Date(result.data.updatedAt) };
+}
+
+async function fetchIndexResult({
+  indexId,
+  apiClient,
+}: {
+  indexId: string;
+  apiClient: TriggerApi;
+}) {
+  const result = await apiClient.getEndpointIndex(indexId);
+
+  if (result.status === "STARTED" || result.status === "PENDING") {
+    throw new Error("Indexing is still in progress");
+  }
+
+  return result;
+}
+
+async function resolveOptions(
+  framework: Framework | undefined,
+  path: string,
+  unresolvedOptions: DevCommandOptions
+): Promise<ResolvedOptions> {
+  if (!framework) {
+    logger.info("  [trigger.dev] Failed to detect framework, using default values");
+    return {
+      port: unresolvedOptions.port ?? 3000,
+      hostname: unresolvedOptions.hostname ?? "localhost",
+      envFile: unresolvedOptions.envFile ?? ".env",
+      handlerPath: unresolvedOptions.handlerPath,
+      clientId: unresolvedOptions.clientId,
+    };
+  }
+
+  //get env filename
+  const envName = await getEnvFilename(path, framework.possibleEnvFilenames());
+
+  return {
+    port: unresolvedOptions.port,
+    hostname: unresolvedOptions.hostname,
+    envFile: unresolvedOptions.envFile ?? envName ?? ".env",
+    handlerPath: unresolvedOptions.handlerPath,
+    clientId: unresolvedOptions.clientId,
+  };
+}
+
+async function verifyEndpoint(
+  resolvedOptions: ResolvedOptions,
+  endpointId: string,
+  apiKey: string,
+  framework?: Framework
+) {
+  //create list of hostnames to try
+  const hostnames = [];
+  if (resolvedOptions.hostname) {
+    hostnames.push(resolvedOptions.hostname);
+  }
+  if (framework) {
+    hostnames.push(...framework.defaultHostnames);
+  } else {
+    hostnames.push("localhost");
+  }
+
+  //create list of ports to try
+  const ports = [];
+  if (resolvedOptions.port) {
+    ports.push(resolvedOptions.port);
+  }
+  if (framework) {
+    ports.push(...framework.defaultPorts);
+  } else {
+    ports.push(3000);
+  }
+
+  //create list of urls to try
+  const urls: { hostname: string; port: number }[] = [];
+  for (const hostname of hostnames) {
+    for (const port of ports) {
+      urls.push({ hostname, port });
+    }
+  }
+
+  //try each hostname
+  for (const url of urls) {
+    const { hostname, port } = url;
+    const localEndpointHandlerUrl = `http://${hostname}:${port}${resolvedOptions.handlerPath}`;
+
+    const spinner = ora(
+      `[trigger.dev] Looking for your trigger endpoint: ${localEndpointHandlerUrl}`
+    ).start();
+
+    try {
+      const response = await fetch(localEndpointHandlerUrl, {
+        method: "POST",
+        headers: {
+          "x-trigger-api-key": apiKey,
+          "x-trigger-action": "PING",
+          "x-trigger-endpoint-id": endpointId,
+        },
+      });
+
+      if (!response.ok || response.status !== 200) {
+        spinner.fail(
+          `[trigger.dev] Server responded with ${response.status} (${localEndpointHandlerUrl}).`
+        );
+        continue;
+      }
+
+      spinner.succeed(`[trigger.dev] Found your trigger endpoint: ${localEndpointHandlerUrl}`);
+      return { hostname, port, handlerPath: resolvedOptions.handlerPath };
+    } catch (err) {
+      spinner.fail(`[trigger.dev] No server found (${localEndpointHandlerUrl}).`);
+    }
+  }
+
+  return;
+}
+
+export function getEndpointId(runtime: JsRuntime, clientId?: string) {
+  if (clientId) {
+    return clientId;
+  } else return runtime.getEndpointId();
 }
 
 async function resolveEndpointUrl(apiUrl: string, port: number, hostname: string) {
   const apiURL = new URL(apiUrl);
 
-  if (apiURL.hostname === "localhost") {
+  //if the API is localhost and the hostname is localhost
+  if (apiURL.hostname === "localhost" && hostname === "localhost") {
     return `http://${hostname}:${port}`;
   }
 
   // Setup tunnel
   const tunnelSpinner = ora(`🚇 Creating tunnel`).start();
-
-  const tunnelUrl = await createTunnel(port, tunnelSpinner);
+  const tunnelUrl = await createTunnel(hostname, port, tunnelSpinner);
 
   if (tunnelUrl) {
     tunnelSpinner.succeed(`🚇 Created tunnel: ${tunnelUrl}`);
@@ -239,9 +418,9 @@ async function resolveEndpointUrl(apiUrl: string, port: number, hostname: string
   return tunnelUrl;
 }
 
-async function createTunnel(port: number, spinner: Ora) {
+async function createTunnel(hostname: string, port: number, spinner: Ora) {
   try {
-    return await ngrok.connect(port);
+    return await ngrok.connect({ addr: `${hostname}:${port}` });
   } catch (error: any) {
     if (
       typeof error.message === "string" &&
@@ -258,6 +437,16 @@ async function createTunnel(port: number, spinner: Ora) {
         return;
       }
     }
+    if (
+      typeof error.message === "string" &&
+      error.message.includes("connect ECONNREFUSED 127.0.0.1:4041")
+    ) {
+      spinner.fail(
+        `Ngrok failed to create a tunnel for port ${port} because ngrok is already running`
+      );
+      return;
+    }
+    spinner.fail(`Ngrok failed to create a tunnel for port ${port}.\n${error.message}`);
     return;
   }
 }
@@ -298,26 +487,4 @@ async function refreshEndpoint(apiClient: TriggerApi, endpointId: string, endpoi
       };
     }
   }
-}
-
-//wait function
-async function wait(ms: number) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
-//throttle function
-let throttleTimeout: NodeJS.Timeout | null = null;
-function throttle(fn: () => any, delay: number) {
-  if (throttleTimeout) {
-    clearTimeout(throttleTimeout);
-  }
-  throttleTimeout = setTimeout(fn, delay);
-}
-
-const maximum_backoff = 30;
-const initial_backoff = 0.2;
-function backoff(attempt: number) {
-  return Math.min((2 ^ attempt) * initial_backoff, maximum_backoff) * 1000;
 }

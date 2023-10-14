@@ -1,15 +1,29 @@
 import type {
+  DisplayProperty,
   EventFilter,
   Logger,
-  RuntimeEnvironmentType,
+  OverridableRunTaskOptions,
+  Prettify,
   RedactString,
+  RegisteredOptionsDiff,
+  RunTaskOptions,
+  RuntimeEnvironmentType,
+  SourceEventOption,
   TriggerMetadata,
 } from "@trigger.dev/core";
-import { DisplayProperty } from "@trigger.dev/core";
 import { Job } from "./job";
 import { TriggerClient } from "./triggerClient";
 
-export type { RedactString, Logger };
+export type {
+  DisplayProperty,
+  Logger,
+  OverridableRunTaskOptions,
+  Prettify,
+  RedactString,
+  RegisteredOptionsDiff,
+  RunTaskOptions,
+  SourceEventOption,
+};
 
 export interface TriggerContext {
   /** Job metadata */
@@ -91,3 +105,16 @@ export interface EventSpecification<TEvent extends any> {
 
 export type EventTypeFromSpecification<TEventSpec extends EventSpecification<any>> =
   TEventSpec extends EventSpecification<infer TEvent> ? TEvent : never;
+
+export type SchemaParserIssue = { path: PropertyKey[]; message: string };
+
+export type SchemaParserResult<T> =
+  | {
+      success: true;
+      data: T;
+    }
+  | { success: false; error: { issues: SchemaParserIssue[] } };
+
+export type SchemaParser<T extends unknown = unknown> = {
+  safeParse: (a: unknown) => SchemaParserResult<T>;
+};

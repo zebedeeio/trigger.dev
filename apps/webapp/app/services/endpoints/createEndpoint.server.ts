@@ -4,6 +4,7 @@ import { AuthenticatedEnvironment } from "../apiAuth.server";
 import { EndpointApi } from "../endpointApi.server";
 import { workerQueue } from "../worker.server";
 import { env } from "~/env.server";
+import { RuntimeEnvironmentType } from "@trigger.dev/database";
 
 const indexingHookIdentifier = customAlphabet("0123456789abcdefghijklmnopqrstuvxyz", 10);
 
@@ -51,6 +52,9 @@ export class CreateEndpointService {
               slug: id,
             },
           },
+          include: {
+            environment: true,
+          },
           create: {
             environment: {
               connect: {
@@ -70,23 +74,36 @@ export class CreateEndpointService {
             slug: id,
             url: endpointUrl,
             indexingHookIdentifier: indexingHookIdentifier(),
+            version: pong.triggerVersion,
           },
           update: {
             url: endpointUrl,
+            version: pong.triggerVersion,
+          },
+        });
+
+        const endpointIndex = await tx.endpointIndex.create({
+          data: {
+            endpointId: endpoint.id,
+            status: "PENDING",
+            source: "INTERNAL",
           },
         });
 
         // Kick off process to fetch the jobs for this endpoint
         await workerQueue.enqueue(
-          "indexEndpoint",
+          "performEndpointIndexing",
           {
-            id: endpoint.id,
-            source: "INTERNAL",
+            id: endpointIndex.id,
           },
-          { tx }
+          {
+            tx,
+            maxAttempts:
+              endpoint.environment.type === RuntimeEnvironmentType.DEVELOPMENT ? 1 : undefined,
+          }
         );
 
-        return endpoint;
+        return { ...endpoint, endpointIndex };
       });
 
       return result;

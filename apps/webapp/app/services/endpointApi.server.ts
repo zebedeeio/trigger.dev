@@ -1,6 +1,9 @@
 import {
+  API_VERSIONS,
   ApiEventLog,
   DeliverEventResponseSchema,
+  DeserializedJson,
+  EndpointHeadersSchema,
   ErrorWithStackSchema,
   HttpSourceRequest,
   HttpSourceResponseSchema,
@@ -9,8 +12,8 @@ import {
   PongResponseSchema,
   PreprocessRunBody,
   PreprocessRunResponseSchema,
-  RegisterTriggerBody,
-  RegisterTriggerBodySchema,
+  RegisterTriggerBodySchemaV1,
+  RegisterTriggerBodyV1,
   RunJobBody,
   RunJobResponseSchema,
   ValidateResponse,
@@ -18,6 +21,8 @@ import {
 } from "@trigger.dev/core";
 import { safeBodyFromResponse, safeParseBodyFromResponse } from "~/utils/json";
 import { logger } from "./logger.server";
+import { ConnectionAuth } from "@trigger.dev/core";
+import { performance } from "node:perf_hooks";
 
 export class EndpointApiError extends Error {
   constructor(message: string, stack?: string) {
@@ -86,10 +91,20 @@ export class EndpointApi {
       };
     }
 
+    const headers = EndpointHeadersSchema.safeParse(Object.fromEntries(response.headers.entries()));
+
+    if (headers.success && headers.data["trigger-version"]) {
+      return {
+        ...pongResponse.data,
+        triggerVersion: headers.data["trigger-version"],
+      };
+    }
+
     return pongResponse.data;
   }
 
   async indexEndpoint() {
+    const startTimeInMs = performance.now();
     const response = await safeFetch(this.url, {
       method: "POST",
       headers: {
@@ -99,72 +114,17 @@ export class EndpointApi {
       },
     });
 
-    if (!response) {
-      throw new Error(`Could not connect to endpoint ${this.url}`);
-    }
-
-    if (response.status === 401) {
-      const body = await safeBodyFromResponse(response, ErrorWithStackSchema);
-
-      if (body) {
-        return {
-          ok: false,
-          error: body.message,
-        } as const;
-      }
-
-      return {
-        ok: false,
-        error: `Trigger API key is invalid`,
-      } as const;
-    }
-
-    if (!response.ok) {
-      throw new Error(`Could not connect to endpoint ${this.url}. Status code: ${response.status}`);
-    }
-
-    const anyBody = await response.json();
-
-    const data = IndexEndpointResponseSchema.parse(anyBody);
-
     return {
-      ok: true,
-      data,
-    } as const;
-  }
-
-  async deliverEvent(event: ApiEventLog) {
-    const response = await safeFetch(this.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-trigger-api-key": this.apiKey,
-        "x-trigger-action": "DELIVER_EVENT",
-      },
-      body: JSON.stringify(event),
-    });
-
-    if (!response) {
-      throw new Error(`Could not connect to endpoint ${this.url}`);
-    }
-
-    if (!response.ok) {
-      throw new Error(`Could not connect to endpoint ${this.url}. Status code: ${response.status}`);
-    }
-
-    const anyBody = await response.json();
-
-    logger.debug("deliverEvent() response from endpoint", {
-      body: anyBody,
-    });
-
-    return DeliverEventResponseSchema.parse(anyBody);
+      response,
+      headerParser: EndpointHeadersSchema,
+      parser: IndexEndpointResponseSchema,
+      errorParser: ErrorWithStackSchema,
+      durationInMs: Math.floor(performance.now() - startTimeInMs),
+    };
   }
 
   async executeJobRequest(options: RunJobBody) {
-    logger.debug("executeJobRequest()", {
-      options,
-    });
+    const startTimeInMs = performance.now();
 
     const response = await safeFetch(this.url, {
       method: "POST",
@@ -180,6 +140,7 @@ export class EndpointApi {
       response,
       parser: RunJobResponseSchema,
       errorParser: ErrorWithStackSchema,
+      durationInMs: Math.floor(performance.now() - startTimeInMs),
     };
   }
 
@@ -197,7 +158,7 @@ export class EndpointApi {
     return { response, parser: PreprocessRunResponseSchema };
   }
 
-  async initializeTrigger(id: string, params: any): Promise<RegisterTriggerBody | undefined> {
+  async initializeTrigger(id: string, params: any): Promise<RegisterTriggerBodyV1 | undefined> {
     const response = await safeFetch(this.url, {
       method: "POST",
       headers: {
@@ -231,7 +192,7 @@ export class EndpointApi {
       body: anyBody,
     });
 
-    return RegisterTriggerBodySchema.parse(anyBody);
+    return RegisterTriggerBodySchemaV1.parse(anyBody);
   }
 
   async deliverHttpSourceRequest(options: {
@@ -241,6 +202,8 @@ export class EndpointApi {
     params: any;
     data: any;
     request: HttpSourceRequest;
+    auth?: ConnectionAuth;
+    metadata?: any;
   }) {
     const response = await safeFetch(this.url, {
       method: "POST",
@@ -255,7 +218,9 @@ export class EndpointApi {
         "x-ts-http-url": options.request.url,
         "x-ts-http-method": options.request.method,
         "x-ts-http-headers": JSON.stringify(options.request.headers),
+        ...(options.auth && { "x-ts-auth": JSON.stringify(options.auth) }),
         ...(options.dynamicId && { "x-ts-dynamic-id": options.dynamicId }),
+        ...(options.metadata && { "x-ts-metadata": JSON.stringify(options.metadata) }),
       },
       body: options.request.rawBody,
     });
@@ -332,6 +297,15 @@ export class EndpointApi {
       };
     }
 
+    const headers = EndpointHeadersSchema.safeParse(Object.fromEntries(response.headers.entries()));
+
+    if (headers.success && headers.data["trigger-version"]) {
+      return {
+        ...validateResponse.data,
+        triggerVersion: headers.data["trigger-version"],
+      };
+    }
+
     return validateResponse.data;
   }
 }
@@ -353,6 +327,7 @@ function addStandardRequestOptions(options: RequestInit) {
     headers: {
       ...options.headers,
       "user-agent": "triggerdotdev-server/2.0.0",
+      "x-trigger-version": API_VERSIONS.LAZY_LOADED_CACHED_TASKS,
     },
   };
 }

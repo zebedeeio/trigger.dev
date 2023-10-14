@@ -1,12 +1,12 @@
 import { IntegrationConfig, JobMetadata, LogLevel, QueueOptions } from "@trigger.dev/core";
-import { IOWithIntegrations, IntegrationClient, TriggerIntegration } from "./integrations";
+import { IOWithIntegrations, TriggerIntegration } from "./integrations";
 import { TriggerClient } from "./triggerClient";
 import type { EventSpecification, Trigger, TriggerContext, TriggerEventType } from "./types";
 import { slugifyId } from "./utils";
 
 export type JobOptions<
   TTrigger extends Trigger<EventSpecification<any>>,
-  TIntegrations extends Record<string, TriggerIntegration<IntegrationClient<any, any>>> = {},
+  TIntegrations extends Record<string, TriggerIntegration> = {},
 > = {
   /** The `id` property is used to uniquely identify the Job. Only change this if you want to create a new Job. */
   id: string;
@@ -58,6 +58,9 @@ export type JobOptions<
     io: IOWithIntegrations<TIntegrations>,
     context: TriggerContext
   ) => Promise<any>;
+
+  // @internal
+  __internal?: boolean;
 };
 
 export type JobPayload<TJob> = TJob extends Job<Trigger<EventSpecification<infer TEvent>>, any>
@@ -71,7 +74,7 @@ export type JobIO<TJob> = TJob extends Job<any, infer TIntegrations>
 /** A [Job](https://trigger.dev/docs/documentation/concepts/jobs) is used to define the [Trigger](https://trigger.dev/docs/documentation/concepts/triggers), metadata, and what happens when it runs. */
 export class Job<
   TTrigger extends Trigger<EventSpecification<any>>,
-  TIntegrations extends Record<string, TriggerIntegration<IntegrationClient<any, any>>> = {},
+  TIntegrations extends Record<string, TriggerIntegration> = {},
 > {
   readonly options: JobOptions<TTrigger, TIntegrations>;
 
@@ -110,6 +113,10 @@ export class Job<
     return this.options.version;
   }
 
+  get logLevel() {
+    return this.options.logLevel;
+  }
+
   get integrations(): Record<string, IntegrationConfig> {
     return Object.keys(this.options.integrations ?? {}).reduce(
       (acc: Record<string, IntegrationConfig>, key) => {
@@ -118,17 +125,13 @@ export class Job<
         acc[key] = {
           id: integration.id,
           metadata: integration.metadata,
-          authSource: integration.client.usesLocalAuth ? "LOCAL" : "HOSTED",
+          authSource: integration.authSource,
         };
 
         return acc;
       },
       {}
     );
-  }
-
-  get logLevel() {
-    return this.options.logLevel;
   }
 
   toJSON(): JobMetadata {

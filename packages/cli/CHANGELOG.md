@@ -1,5 +1,92 @@
 # create-trigger
 
+## 2.2.0
+
+### Minor Changes
+
+- 975c5f1d: Drop support for Node v16, require Node >= 18. This allows us to use native fetch in our SDK which paves the way for multi-platform support.
+
+### Patch Changes
+
+- c070e78d: allow users to update trigger-dev packages to a specific version
+- 50e3d9e4: When indexing user's jobs errors are now stored and displayed
+- be9b5113: allow CLI dev to use injected environment variable
+- b12bc604: remove unused envFile param in sendEvent.ts cmd
+- Updated dependencies [975c5f1d]
+- Updated dependencies [50e3d9e4]
+- Updated dependencies [59a94c71]
+  - @trigger.dev/core@2.2.0
+
+## 2.1.9
+
+### Patch Changes
+
+- 9a187f9e: upgrade zod to 3.22.3
+- 914745f6: Removed log when a file is changed
+
+## 2.1.8
+
+## 2.1.7
+
+### Patch Changes
+
+- 7760e094: Improved CLI init Next.js middleware detection
+
+## 2.1.6
+
+### Patch Changes
+
+- 2397fcb6: Added Express support to the CLI
+
+## 2.1.5
+
+### Patch Changes
+
+- 4578f6bd: Added Astro automatic installation
+
+## 2.1.4
+
+### Patch Changes
+
+- 486ed20a: Moved examples to references in the monorepo
+- 1a495272: CLI now supports multiple frameworks (starting with Next.js and Remix)
+
+## 2.1.3
+
+## 2.1.2
+
+## 2.1.1
+
+### Patch Changes
+
+- feat: add proxy support for node-fetch ([#404](https://github.com/triggerdotdev/trigger.dev/pull/404))
+- If Nextjs project detection fails, point people at the installation docs ([#446](https://github.com/triggerdotdev/trigger.dev/pull/446))
+- create-integration uses updated OpenAI prompts ([`39b8445e`](https://github.com/triggerdotdev/trigger.dev/commit/39b8445e06cc389fc5d24efc2ac23ed9644f2733))
+
+## 2.1.0
+
+### Minor Changes
+
+- Integrations are now simpler and support authentication during webhook registration ([`878da3c0`](https://github.com/triggerdotdev/trigger.dev/commit/878da3c01f0a4dfaf33a1f8943a7ad4eed8b8877))
+
+## 2.1.0-beta.1
+
+## 2.1.0-beta.0
+
+### Minor Changes
+
+- Integrations are now simpler and support authentication during webhook registration ([`878da3c0`](https://github.com/triggerdotdev/trigger.dev/commit/878da3c01f0a4dfaf33a1f8943a7ad4eed8b8877))
+
+## 2.0.14
+
+## 2.0.13
+
+### Patch Changes
+
+- provided a fix to the CLI dev command tunnel not working if you are already running ngrok ([#407](https://github.com/triggerdotdev/trigger.dev/pull/407))
+- fix: init will no longer fail when outside of a git repo ([`3028b6ad`](https://github.com/triggerdotdev/trigger.dev/commit/3028b6ad9d693d2f1662c4338d44ac9d3bf0da3a))
+- feat: Checks for outdated packages when running the dev command with instructions on how to update ([#412](https://github.com/triggerdotdev/trigger.dev/pull/412))
+
 ## 2.0.12
 
 ## 2.0.11

@@ -1,4 +1,9 @@
-import type { ConnectionType, Integration, IntegrationConnection } from "@trigger.dev/database";
+import {
+  RuntimeEnvironmentType,
+  type ConnectionType,
+  type Integration,
+  type IntegrationConnection,
+} from "@trigger.dev/database";
 import type { PrismaClient, PrismaClientOrTransaction } from "~/db.server";
 import { prisma } from "~/db.server";
 import { enqueueRunExecutionV2 } from "~/models/jobRunExecution.server";
@@ -45,11 +50,11 @@ export class StartRunService {
               integrationId: runConnection.integration.id,
               authSource: "HOSTED",
             } as const)
-          : runConnection.result === "resolvedLocal"
+          : runConnection.result === "resolvedLocal" || runConnection.result === "resolvedResolver"
           ? ({
               key,
               integrationId: runConnection.integration.id,
-              authSource: "LOCAL",
+              authSource: runConnection.result === "resolvedLocal" ? "LOCAL" : "RESOLVER",
             } as const)
           : undefined
       )
@@ -83,7 +88,9 @@ export class StartRunService {
 
     const updatedRun = await updateRun();
 
-    await enqueueRunExecutionV2(updatedRun, this.#prismaClient);
+    await enqueueRunExecutionV2(updatedRun, this.#prismaClient, {
+      skipRetrying: run.environment.type === RuntimeEnvironmentType.DEVELOPMENT,
+    });
   }
 
   async #handleMissingConnections(id: string, runConnectionsByKey: RunConnectionsByKey) {
@@ -140,6 +147,7 @@ async function findRun(tx: PrismaClientOrTransaction, id: string) {
     where: { id },
     include: {
       queue: true,
+      environment: true,
       version: {
         include: {
           integrations: {
@@ -165,6 +173,7 @@ async function createRunConnections(tx: PrismaClientOrTransaction, run: FoundRun
               integration: Integration;
             }
           | { result: "resolvedLocal"; integration: Integration }
+          | { result: "resolvedResolver"; integration: Integration }
           | {
               result: "missing";
               connectionType: ConnectionType;
@@ -180,6 +189,11 @@ async function createRunConnections(tx: PrismaClientOrTransaction, run: FoundRun
       if (jobIntegration.integration.authSource === "LOCAL") {
         acc[jobIntegration.key] = {
           result: "resolvedLocal",
+          integration: jobIntegration.integration,
+        };
+      } else if (jobIntegration.integration.authSource === "RESOLVER") {
+        acc[jobIntegration.key] = {
+          result: "resolvedResolver",
           integration: jobIntegration.integration,
         };
       } else {

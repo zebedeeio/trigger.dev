@@ -1,7 +1,8 @@
+import { RuntimeEnvironmentType } from "@trigger.dev/database";
 import { $transaction, Prisma, PrismaClient, prisma } from "~/db.server";
 import { enqueueRunExecutionV2 } from "~/models/jobRunExecution.server";
 
-const RESUMABLE_STATUSES = ["FAILURE", "TIMED_OUT", "ABORTED", "CANCELED"];
+const RESUMABLE_STATUSES = ["FAILURE", "TIMED_OUT", "UNRESOLVED_AUTH", "ABORTED", "CANCELED"];
 
 export class ContinueRunService {
   #prismaClient: PrismaClient;
@@ -16,6 +17,9 @@ export class ContinueRunService {
       async (tx) => {
         const run = await tx.jobRun.findUniqueOrThrow({
           where: { id: runId },
+          include: {
+            environment: true,
+          },
         });
 
         if (!RESUMABLE_STATUSES.includes(run.status)) {
@@ -35,7 +39,9 @@ export class ContinueRunService {
           },
         });
 
-        await enqueueRunExecutionV2(run, tx);
+        await enqueueRunExecutionV2(run, tx, {
+          skipRetrying: run.environment.type === RuntimeEnvironmentType.DEVELOPMENT,
+        });
       },
       { timeout: 10000 }
     );

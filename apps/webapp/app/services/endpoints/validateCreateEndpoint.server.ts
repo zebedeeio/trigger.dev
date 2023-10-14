@@ -5,6 +5,7 @@ import { AuthenticatedEnvironment } from "../apiAuth.server";
 import { workerQueue } from "../worker.server";
 import { CreateEndpointError } from "./createEndpoint.server";
 import { EndpointApi } from "../endpointApi.server";
+import { RuntimeEnvironmentType } from "@trigger.dev/database";
 
 const indexingHookIdentifier = customAlphabet("0123456789abcdefghijklmnopqrstuvxyz", 10);
 
@@ -35,6 +36,9 @@ export class ValidateCreateEndpointService {
               slug: validationResult.endpointId,
             },
           },
+          include: {
+            environment: true,
+          },
           create: {
             environment: {
               connect: {
@@ -54,20 +58,29 @@ export class ValidateCreateEndpointService {
             slug: validationResult.endpointId,
             url: endpointUrl,
             indexingHookIdentifier: indexingHookIdentifier(),
+            version: validationResult.triggerVersion,
           },
           update: {
             url: endpointUrl,
+            version: validationResult.triggerVersion,
           },
         });
 
-        // Kick off process to fetch the jobs for this endpoint
+        const index = await tx.endpointIndex.create({
+          data: { endpointId: endpoint.id, status: "PENDING", source: "INTERNAL" },
+        });
+
+        // Kick off process to fetch the jobs for this index
         await workerQueue.enqueue(
-          "indexEndpoint",
+          "performEndpointIndexing",
           {
-            id: endpoint.id,
-            source: "INTERNAL",
+            id: index.id,
           },
-          { tx }
+          {
+            tx,
+            maxAttempts:
+              endpoint.environment.type === RuntimeEnvironmentType.DEVELOPMENT ? 1 : undefined,
+          }
         );
 
         return endpoint;

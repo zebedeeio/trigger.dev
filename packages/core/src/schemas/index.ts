@@ -11,3 +11,5 @@ export * from "./notifications";
 export * from "./fetch";
 export * from "./events";
 export * from "./runs";
+export * from "./addMissingVersionField";
+export * from "./statuses";

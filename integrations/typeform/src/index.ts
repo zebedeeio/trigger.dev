@@ -1,52 +1,57 @@
+import { safeParseBody } from "@trigger.dev/integration-kit";
+import {
+  ConnectionAuth,
+  EventSpecification,
+  ExternalSource,
+  ExternalSourceTrigger,
+  HandlerEvent,
+  IO,
+  IOTask,
+  IntegrationTaskKey,
+  Json,
+  Logger,
+  RunTaskErrorCallback,
+  RunTaskOptions,
+  TriggerIntegration,
+  retry,
+} from "@trigger.dev/sdk";
 import { createClient } from "@typeform/api-client";
-import * as tasks from "./tasks";
-
+import { createHmac } from "node:crypto";
+import { z } from "zod";
+import { SOURCE } from "./consts";
+import { Forms } from "./forms";
+import { formResponseExample } from "./payload-examples";
+import { Responses } from "./responses";
 import {
   FormResponseEvent,
   GetWebhookResponse,
   TypeformIntegrationOptions,
   TypeformSDK,
 } from "./types";
-import {
-  TriggerIntegration,
-  IntegrationClient,
-  ExternalSource,
-  HandlerEvent,
-  Logger,
-  ExternalSourceTrigger,
-  EventSpecification,
-} from "@trigger.dev/sdk";
-import { createHmac } from "node:crypto";
-import { z } from "zod";
-import { formResponseExample } from "./payload-examples";
-import { safeParseBody } from "@trigger.dev/integration-kit";
-import { SOURCE } from "./consts";
+import { Webhooks } from "./webhooks";
 
 export * from "./types";
 
-type TypeformIntegration = TriggerIntegration<TypeformIntegrationClient>;
-type TypeformIntegrationClient = IntegrationClient<TypeformSDK, typeof tasks>;
-
 type TypeformSource = ReturnType<typeof createWebhookEventSource>;
 type TypeformTrigger = ReturnType<typeof createWebhookEventTrigger>;
+export type TypeformRunTask = InstanceType<typeof Typeform>["runTask"];
 
-export class Typeform implements TypeformIntegration {
-  client: TypeformIntegrationClient;
+export class Typeform implements TriggerIntegration {
+  // @internal
+  private _options: TypeformIntegrationOptions;
+  // @internal
+  private _client?: TypeformSDK;
+  // @internal
+  private _io?: IO;
+  // @internal
+  private _connectionKey?: string;
 
   constructor(private options: TypeformIntegrationOptions) {
-    if (Object.keys(options).includes("token") && !options.token) {
-      throw `Can't create Typeform integration (${options.id}) as token was undefined`;
-    }
+    this._options = options;
+  }
 
-    this.client = {
-      tasks,
-      usesLocalAuth: true,
-      client: createClient({ token: options.token }),
-      auth: {
-        token: options.token,
-        apiBaseUrl: options.apiBaseUrl,
-      },
-    };
+  get authSource() {
+    return "LOCAL" as const;
   }
 
   get id() {
@@ -56,6 +61,72 @@ export class Typeform implements TypeformIntegration {
   get metadata() {
     return { id: "typeform", name: "Typeform" };
   }
+
+  cloneForRun(io: IO, connectionKey: string, auth?: ConnectionAuth) {
+    const token = this._options.token ?? auth?.accessToken;
+
+    if (!token) {
+      throw new Error(
+        `Can't initialize Typeform integration (${this._options.id}) as token was undefined`
+      );
+    }
+
+    const typeform = new Typeform(this._options);
+    typeform._io = io;
+    typeform._connectionKey = connectionKey;
+    typeform._client = createClient({ token });
+    return typeform;
+  }
+
+  runTask<T, TResult extends Json<T> | void>(
+    key: IntegrationTaskKey,
+    callback: (client: TypeformSDK, task: IOTask, io: IO) => Promise<TResult>,
+    options?: RunTaskOptions,
+    errorCallback?: RunTaskErrorCallback
+  ): Promise<TResult> {
+    if (!this._io) throw new Error("No IO");
+    if (!this._connectionKey) throw new Error("No connection key");
+    return this._io.runTask(
+      key,
+      (task, io) => {
+        if (!this._client) throw new Error("No client");
+        return callback(this._client, task, io);
+      },
+      {
+        icon: "typeform",
+        retry: retry.standardBackoff,
+        ...(options ?? {}),
+        connectionKey: this._connectionKey,
+      },
+      errorCallback
+    );
+  }
+
+  get forms() {
+    return new Forms(this.runTask.bind(this));
+  }
+
+  listForms = this.forms.list;
+  getForm = this.forms.get;
+
+  get responses() {
+    return new Responses(this.runTask.bind(this));
+  }
+
+  listResponses = this.responses.list;
+
+  /** @deprecated this is being replaced by responses.all */
+  getAllResponses = this.responses.all.bind(this.responses);
+
+  get webhooks() {
+    return new Webhooks(this.runTask.bind(this));
+  }
+
+  createWebhook = this.webhooks.create;
+  listWebhooks = this.webhooks.list;
+  updateWebhook = this.webhooks.update;
+  getWebhook = this.webhooks.get;
+  deleteWebhook = this.webhooks.delete;
 
   get source(): TypeformSource {
     return createWebhookEventSource(this);
@@ -112,6 +183,7 @@ function createWebhookEventTrigger(
       event,
       params: { uid, tag },
       source,
+      options: {},
     });
   };
 }
@@ -122,8 +194,8 @@ const WebhookSchema = z.object({
 });
 
 export function createWebhookEventSource(
-  integration: TypeformIntegration
-): ExternalSource<TypeformIntegration, { uid: string; tag: string }, "HTTP"> {
+  integration: Typeform
+): ExternalSource<Typeform, { uid: string; tag: string }, "HTTP", {}> {
   return new ExternalSource("HTTP", {
     id: "typeform.forms",
     schema: WebhookSchema,
@@ -149,6 +221,10 @@ export function createWebhookEventSource(
     register: async (event, io, ctx) => {
       const { params, source: httpSource } = event;
 
+      const registeredOptions = {
+        event: ["form_response"],
+      };
+
       if (httpSource.active && isWebhookData(httpSource.data) && !httpSource.data.enabled) {
         // Update the webhook to re-enable it
         const newWebhookData = await io.integration.updateWebhook("update-webhook", {
@@ -162,7 +238,7 @@ export function createWebhookEventSource(
 
         return {
           data: newWebhookData,
-          registeredEvents: ["form_response"],
+          options: registeredOptions,
         };
       }
 
@@ -178,7 +254,7 @@ export function createWebhookEventSource(
 
         return {
           data: newWebhookData,
-          registeredEvents: ["form_response"],
+          options: registeredOptions,
         };
       };
 
@@ -192,7 +268,7 @@ export function createWebhookEventSource(
         if (existingWebhook.enabled) {
           return {
             data: existingWebhook,
-            registeredEvents: ["form_response"],
+            options: registeredOptions,
           };
         }
 
@@ -207,7 +283,7 @@ export function createWebhookEventSource(
 
         return {
           data: newWebhookData,
-          registeredEvents: ["form_response"],
+          options: registeredOptions,
         };
       } catch (error) {
         return createWebhook();

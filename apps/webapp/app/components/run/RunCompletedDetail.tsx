@@ -2,7 +2,7 @@ import { CodeBlock } from "~/components/code/CodeBlock";
 import { DateTime } from "~/components/primitives/DateTime";
 import { Paragraph } from "~/components/primitives/Paragraph";
 import { RunStatusIcon, RunStatusLabel } from "~/components/runs/RunStatuses";
-import { MatchedRun, useRun } from "~/hooks/useRun";
+import { MatchedRun } from "~/hooks/useRun";
 import { formatDuration } from "~/utils";
 import {
   RunPanel,
@@ -54,7 +54,7 @@ export function RunCompletedDetail({ run }: { run: MatchedRun }) {
         <RunPanelDivider />
         {run.error && <RunPanelError text={run.error.message} stackTrace={run.error.stack} />}
         {run.output ? (
-          <CodeBlock language="json" code={run.output} />
+          <CodeBlock language="json" code={run.output} maxLines={36} />
         ) : (
           run.output === null && <Paragraph variant="small">This run returned nothing</Paragraph>
         )}

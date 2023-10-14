@@ -62,83 +62,7 @@ export class RegisterJobService {
       });
 
       if (!integration) {
-        if (jobIntegration.authSource === "LOCAL") {
-          integration = await this.#prismaClient.integration.upsert({
-            where: {
-              organizationId_slug: {
-                organizationId: environment.organizationId,
-                slug: jobIntegration.id,
-              },
-            },
-            create: {
-              slug: jobIntegration.id,
-              title: jobIntegration.metadata.name,
-              authSource: "LOCAL",
-              connectionType: "DEVELOPER",
-              organization: {
-                connect: {
-                  id: environment.organizationId,
-                },
-              },
-              definition: {
-                connectOrCreate: {
-                  where: {
-                    id: jobIntegration.metadata.id,
-                  },
-                  create: {
-                    id: jobIntegration.metadata.id,
-                    name: jobIntegration.metadata.name,
-                    instructions: jobIntegration.metadata.instructions,
-                  },
-                },
-              },
-            },
-            update: {
-              title: jobIntegration.metadata.name,
-              authSource: "LOCAL",
-              connectionType: "DEVELOPER",
-              definition: {
-                connectOrCreate: {
-                  where: {
-                    id: jobIntegration.metadata.id,
-                  },
-                  create: {
-                    id: jobIntegration.metadata.id,
-                    name: jobIntegration.metadata.name,
-                    instructions: jobIntegration.metadata.instructions,
-                  },
-                },
-              },
-            },
-          });
-        } else {
-          integration = await this.#prismaClient.integration.create({
-            data: {
-              slug: jobIntegration.id,
-              title: jobIntegration.id,
-              authSource: "HOSTED",
-              setupStatus: "MISSING_FIELDS",
-              connectionType: "DEVELOPER",
-              organization: {
-                connect: {
-                  id: environment.organizationId,
-                },
-              },
-              definition: {
-                connectOrCreate: {
-                  where: {
-                    id: jobIntegration.metadata.id,
-                  },
-                  create: {
-                    id: jobIntegration.metadata.id,
-                    name: jobIntegration.metadata.name,
-                    instructions: jobIntegration.metadata.instructions,
-                  },
-                },
-              },
-            },
-          });
-        }
+        integration = await this.#upsertIntegrationForJobIntegration(environment, jobIntegration);
       }
 
       integrations.set(jobIntegration.id, integration);
@@ -298,7 +222,7 @@ export class RegisterJobService {
           },
           update: {
             name: example.name,
-            icon: example.icon,
+            icon: example.icon ?? null,
             payload: example.payload,
           },
         });
@@ -472,9 +396,149 @@ export class RegisterJobService {
           key: job.id,
           dispatcher: eventDispatcher,
           schedule: trigger.schedule,
+          organizationId: job.organizationId,
         });
 
         break;
+      }
+    }
+  }
+
+  async #upsertIntegrationForJobIntegration(
+    environment: AuthenticatedEnvironment,
+    jobIntegration: IntegrationConfig
+  ): Promise<Integration> {
+    switch (jobIntegration.authSource) {
+      case "LOCAL": {
+        return await this.#prismaClient.integration.upsert({
+          where: {
+            organizationId_slug: {
+              organizationId: environment.organizationId,
+              slug: jobIntegration.id,
+            },
+          },
+          create: {
+            slug: jobIntegration.id,
+            title: jobIntegration.metadata.name,
+            authSource: "LOCAL",
+            connectionType: "DEVELOPER",
+            organization: {
+              connect: {
+                id: environment.organizationId,
+              },
+            },
+            definition: {
+              connectOrCreate: {
+                where: {
+                  id: jobIntegration.metadata.id,
+                },
+                create: {
+                  id: jobIntegration.metadata.id,
+                  name: jobIntegration.metadata.name,
+                  instructions: jobIntegration.metadata.instructions,
+                },
+              },
+            },
+          },
+          update: {
+            title: jobIntegration.metadata.name,
+            authSource: "LOCAL",
+            connectionType: "DEVELOPER",
+            definition: {
+              connectOrCreate: {
+                where: {
+                  id: jobIntegration.metadata.id,
+                },
+                create: {
+                  id: jobIntegration.metadata.id,
+                  name: jobIntegration.metadata.name,
+                  instructions: jobIntegration.metadata.instructions,
+                },
+              },
+            },
+          },
+        });
+      }
+      case "HOSTED": {
+        return await this.#prismaClient.integration.create({
+          data: {
+            slug: jobIntegration.id,
+            title: jobIntegration.id,
+            authSource: "HOSTED",
+            setupStatus: "MISSING_FIELDS",
+            connectionType: "DEVELOPER",
+            organization: {
+              connect: {
+                id: environment.organizationId,
+              },
+            },
+            definition: {
+              connectOrCreate: {
+                where: {
+                  id: jobIntegration.metadata.id,
+                },
+                create: {
+                  id: jobIntegration.metadata.id,
+                  name: jobIntegration.metadata.name,
+                  instructions: jobIntegration.metadata.instructions,
+                },
+              },
+            },
+          },
+        });
+      }
+      case "RESOLVER": {
+        return await this.#prismaClient.integration.upsert({
+          where: {
+            organizationId_slug: {
+              organizationId: environment.organizationId,
+              slug: jobIntegration.id,
+            },
+          },
+          create: {
+            slug: jobIntegration.id,
+            title: jobIntegration.metadata.name,
+            authSource: "RESOLVER",
+            connectionType: "EXTERNAL",
+            organization: {
+              connect: {
+                id: environment.organizationId,
+              },
+            },
+            definition: {
+              connectOrCreate: {
+                where: {
+                  id: jobIntegration.metadata.id,
+                },
+                create: {
+                  id: jobIntegration.metadata.id,
+                  name: jobIntegration.metadata.name,
+                  instructions: jobIntegration.metadata.instructions,
+                },
+              },
+            },
+          },
+          update: {
+            title: jobIntegration.metadata.name,
+            authSource: "RESOLVER",
+            connectionType: "EXTERNAL",
+            definition: {
+              connectOrCreate: {
+                where: {
+                  id: jobIntegration.metadata.id,
+                },
+                create: {
+                  id: jobIntegration.metadata.id,
+                  name: jobIntegration.metadata.name,
+                  instructions: jobIntegration.metadata.instructions,
+                },
+              },
+            },
+          },
+        });
+      }
+      default: {
+        assertExhaustive(jobIntegration.authSource);
       }
     }
   }
@@ -571,4 +635,8 @@ export class RegisterJobService {
       },
     });
   }
+}
+
+function assertExhaustive(x: never): never {
+  throw new Error("Unexpected object: " + x);
 }

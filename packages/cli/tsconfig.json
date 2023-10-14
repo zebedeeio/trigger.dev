@@ -9,7 +9,6 @@
     "resolveJsonModule": true,
     "allowJs": true,
     "checkJs": true,
-
     /* EMIT RULES */
     "outDir": "./dist",
     "noEmit": true, // TSUP takes care of emitting js for us, in a MUCH faster way
@@ -47,7 +46,7 @@
     "useDefineForClassFields": true,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-    "types": ["jest"]
+    "types": ["vitest/globals"]
   },
   "exclude": ["node_modules"]
 }

@@ -16,7 +16,7 @@ export const client = new TriggerClient({
 });
 ```
 
-View the [Client API Reference](//sdk/triggerclient) for more information.
+View the [Client API Reference](/sdk/triggerclient) for more information.
 
 ## Adaptors
 
@@ -24,8 +24,12 @@ Adaptors allows Clients to receive data from the Trigger API. They do this by cr
 
 Each platform has one or more adaptors, see the guides below:
 
-| Platform                                          | Adaptor              |
-| ------------------------------------------------- | -------------------- |
-| [Next.js](/documentation/guides/platforms/nextjs) | `createPagesRoute()` |
-| [Next.js](/documentation/guides/platforms/nextjs) | `createAppRoute()`   |
-| Express                                           | Coming soon          |
+| Platform                                               | Adaptor               |
+| ------------------------------------------------------ | --------------------- |
+| [Next.js](/documentation/guides/platforms/nextjs)      | `createPagesRoute()`  |
+| [Next.js](/documentation/guides/platforms/nextjs)      | `createAppRoute()`    |
+| [NestJS](/documentation/guides/manual/nestjs)          | `TriggerDevModule`    |
+| [Astro](/documentation/guides/platforms/astro)         | `createAstroRoute()`  |
+| [Remix](/documentation/guides/platforms/remix)         | `createRemixRoute()`  |
+| [Sveltekit](/documentation/guides/platforms/sveltekit) | `createSvelteRoute()` |
+| Express                                                | Coming soon           |

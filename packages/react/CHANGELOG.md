@@ -1,5 +1,123 @@
 # @trigger.dev/react
 
+## 2.2.0
+
+### Patch Changes
+
+- Updated dependencies [975c5f1d]
+- Updated dependencies [50e3d9e4]
+- Updated dependencies [59a94c71]
+  - @trigger.dev/core@2.2.0
+
+## 2.1.9
+
+### Patch Changes
+
+- 9a187f9e: upgrade zod to 3.22.3
+- Updated dependencies [9a187f9e]
+  - @trigger.dev/core@2.1.9
+
+## 2.1.8
+
+### Patch Changes
+
+- Updated dependencies [6a992a19]
+- Updated dependencies [ab9e4a98]
+- Updated dependencies [ab9e4a98]
+  - @trigger.dev/core@2.1.8
+
+## 2.1.7
+
+### Patch Changes
+
+- @trigger.dev/core@2.1.7
+
+## 2.1.6
+
+### Patch Changes
+
+- @trigger.dev/core@2.1.6
+
+## 2.1.5
+
+### Patch Changes
+
+- @trigger.dev/core@2.1.5
+
+## 2.1.4
+
+### Patch Changes
+
+- ad14983e: You can create statuses in your Jobs that can then be read using React hooks
+- Updated dependencies [ad14983e]
+- Updated dependencies [50137a6f]
+- Updated dependencies [c0dfa804]
+  - @trigger.dev/core@2.1.4
+
+## 2.1.3
+
+### Patch Changes
+
+- Updated dependencies:
+  - `@trigger.dev/core@2.1.3`
+
+## 2.1.2
+
+### Patch Changes
+
+- Updated dependencies:
+  - `@trigger.dev/core@2.1.2`
+
+## 2.1.1
+
+### Patch Changes
+
+- Updated dependencies:
+  - `@trigger.dev/core@2.1.1`
+
+## 2.1.0
+
+### Minor Changes
+
+- Integrations are now simpler and support authentication during webhook registration ([`878da3c0`](https://github.com/triggerdotdev/trigger.dev/commit/878da3c01f0a4dfaf33a1f8943a7ad4eed8b8877))
+
+### Patch Changes
+
+- Updated dependencies:
+  - `@trigger.dev/core@2.1.0`
+
+## 2.1.0-beta.1
+
+### Patch Changes
+
+- Updated dependencies:
+  - `@trigger.dev/core@2.1.0-beta.1`
+
+## 2.1.0-beta.0
+
+### Minor Changes
+
+- Integrations are now simpler and support authentication during webhook registration ([`878da3c0`](https://github.com/triggerdotdev/trigger.dev/commit/878da3c01f0a4dfaf33a1f8943a7ad4eed8b8877))
+
+### Patch Changes
+
+- Updated dependencies:
+  - `@trigger.dev/core@2.1.0-beta.0`
+
+## 2.0.14
+
+### Patch Changes
+
+- Updated dependencies:
+  - `@trigger.dev/core@2.0.14`
+
+## 2.0.13
+
+### Patch Changes
+
+- Updated dependencies:
+  - `@trigger.dev/core@2.0.13`
+
 ## 2.0.12
 
 ### Patch Changes
