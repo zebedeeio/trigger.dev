@@ -103,6 +103,12 @@
       ],
       "@trigger.dev/replicate/*": [
         "../../integrations/replicate/src/*"
+      ],
+      "@trigger.dev/zbd": [
+        "../../integrations/zbd/src/index"
+      ],
+      "@trigger.dev/zbd/*": [
+        "../../integrations/zbd/src/*"
       ]
     }
   }

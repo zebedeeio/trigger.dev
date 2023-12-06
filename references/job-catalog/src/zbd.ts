@@ -2,7 +2,10 @@ import { createExpressServer } from "@trigger.dev/express";
 import { TriggerClient, eventTrigger } from "@trigger.dev/sdk";
 import { ZBD } from "@trigger.dev/zbd";
 
-export const zbd = new ZBD({ id: "slack" });
+export const zbd = new ZBD({ 
+  id: "zbd-client",
+  apiKey: process.env.ZBD_API_KEY!,
+});
 
 export const client = new TriggerClient({
   id: "job-catalog",
@@ -23,9 +26,12 @@ client.defineJob({
     zbd,
   },
   run: async (payload, io, ctx) => {
-    await io.zbd.sendLightningAddressPayment({
+    await io.zbd.sendLightningAddressPayment("send-lighting-address-payment", {
       lnAddress: "andre@zbd.gg",
       amount: "100000",
+      comment: "hello",
+      callbackUrl: "https://webhook.site/7f7f7f7f-7f7f-7f7f-7f7f-7f7f7f7f7f7f",
+      internalId: "123",
     });
   },
 });
